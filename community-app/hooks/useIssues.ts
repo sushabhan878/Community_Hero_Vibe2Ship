@@ -1,6 +1,11 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { type Issue, type IssueMarker, type SortBy } from '../lib/types'
+import { apiPost, apiGet, getAuthHeaders } from '../lib/api'
+import { uploadToCloudinary } from '../lib/cloudinary'
+import { useAuthStore } from '../stores/authStore'
+import { type Issue, type IssueMarker, type SortBy, type Profile } from '../lib/types'
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface IssuesParams {
   page?: number
@@ -8,6 +13,7 @@ interface IssuesParams {
   status?: string
   category?: string
   severity?: string
+  reporter_id?: string
   lat?: number
   lng?: number
   radius_km?: number
@@ -19,25 +25,25 @@ export function useIssues(params: IssuesParams = {}) {
   return useInfiniteQuery({
     queryKey: ['issues', params],
     queryFn: async ({ pageParam = 1 }) => {
-      const query = new URLSearchParams()
-      query.set('page', String(pageParam))
-      query.set('limit', String(params.limit ?? 20))
-      if (params.status) query.set('status', params.status)
-      if (params.category) query.set('category', params.category)
-      if (params.severity) query.set('severity', params.severity)
-      if (params.lat) query.set('lat', String(params.lat))
-      if (params.lng) query.set('lng', String(params.lng))
-      if (params.radius_km) query.set('radius_km', String(params.radius_km))
-      if (params.sort) query.set('sort', params.sort)
-      if (params.search) query.set('search', params.search)
+      const headers = await getAuthHeaders()
+      const qs = new URLSearchParams()
+      qs.set('page', String(pageParam))
+      qs.set('limit', String(params.limit ?? 20))
+      if (params.status) qs.set('status', params.status)
+      if (params.category) qs.set('category', params.category)
+      if (params.severity) qs.set('severity', params.severity)
+      if (params.reporter_id) qs.set('reporter_id', params.reporter_id)
+      if (params.lat !== undefined) qs.set('lat', String(params.lat))
+      if (params.lng !== undefined) qs.set('lng', String(params.lng))
+      if (params.radius_km) qs.set('radius_km', String(params.radius_km))
+      if (params.sort) qs.set('sort', params.sort)
+      if (params.search) qs.set('search', params.search)
 
-      const { data, error } = await supabase.functions.invoke(`issues?${query.toString()}`, {
-        method: 'GET',
-      })
-      if (error || !data) {
+      const res = await fetch(`${API_URL}/api/issues?${qs.toString()}`, { headers })
+      if (!res.ok) {
         return { issues: [], pagination: { page: pageParam, has_more: false } }
       }
-      return data as { issues: Issue[]; pagination: { page: number; has_more: boolean } }
+      return (await res.json()) as { issues: Issue[]; pagination: { page: number; has_more: boolean } }
     },
     getNextPageParam: (lastPage) =>
       lastPage?.pagination?.has_more ? lastPage.pagination.page + 1 : undefined,
@@ -49,10 +55,10 @@ export function useIssue(id: string) {
   return useQuery({
     queryKey: ['issue', id],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke(`issues/${id}`, {
-        method: 'GET',
-      })
-      if (error || !data) return null
+      const headers = await getAuthHeaders()
+      const res = await fetch(`${API_URL}/api/issues/${id}`, { headers })
+      if (!res.ok) return null
+      const data = await res.json()
       return (data as { issue: Issue }).issue
     },
     enabled: !!id,
@@ -63,15 +69,15 @@ export function useNearbyMarkers(lat?: number, lng?: number, radiusKm = 2) {
   return useQuery({
     queryKey: ['issues', 'nearby', lat, lng, radiusKm],
     queryFn: async () => {
-      const query = new URLSearchParams()
-      query.set('lat', String(lat))
-      query.set('lng', String(lng))
-      query.set('radius_km', String(radiusKm))
+      const headers = await getAuthHeaders()
+      const qs = new URLSearchParams()
+      qs.set('lat', String(lat))
+      qs.set('lng', String(lng))
+      qs.set('radius_km', String(radiusKm))
 
-      const { data, error } = await supabase.functions.invoke(`issues/nearby?${query.toString()}`, {
-        method: 'GET',
-      })
-      if (error || !data) return []
+      const res = await fetch(`${API_URL}/api/issues/nearby?${qs.toString()}`, { headers })
+      if (!res.ok) return []
+      const data = await res.json()
       return (data as { markers: IssueMarker[] }).markers
     },
     enabled: !!lat && !!lng,
@@ -94,15 +100,23 @@ export function useCreateIssue() {
       image_urls: string[]
       video_url?: string
     }) => {
-      const { data, error } = await supabase.functions.invoke('issues', {
-        method: 'POST',
-        body: issueData,
-      })
-      if (error) throw error
-      return data as { issue: Issue }
+      const data = await apiPost<{ issue: Issue }>('/api/issues', issueData)
+      return data
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['issues'] })
+      const user = useAuthStore.getState().session?.user
+      if (user) {
+        await supabase.rpc('allocate_badges', { user_id: user.id })
+        const { data } = await supabase
+          .from('profiles')
+          .select('*, badges(*), department:departments(*)')
+          .eq('id', user.id)
+          .single()
+        if (data) {
+          useAuthStore.getState().setProfile(data as unknown as Profile)
+        }
+      }
     },
   })
 }
@@ -134,25 +148,56 @@ export function useUpdateIssueStatus() {
   })
 }
 
+export function useUpdateAiAnalysis() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ai_summary,
+      ai_category,
+      ai_severity,
+    }: {
+      id: string
+      ai_summary?: string
+      ai_category?: string
+      ai_severity?: string
+    }) => {
+      const body: Record<string, unknown> = {}
+      if (ai_summary !== undefined) body.ai_summary = ai_summary
+      if (ai_category !== undefined) body.ai_category = ai_category
+      if (ai_severity !== undefined) body.ai_severity = ai_severity
+      const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'
+      const headers = await getAuthHeaders()
+      const res = await fetch(`${API_URL}/api/issues/${id}/ai-analysis`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error?.message || 'Failed to update AI analysis')
+      return data as { success: boolean }
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['issue', variables.id] })
+      queryClient.invalidateQueries({ queryKey: ['issues'] })
+    },
+  })
+}
+
 export function useUploadMedia() {
   return useMutation({
     mutationFn: async ({
       files,
-      issueTempId,
     }: {
       files: { uri: string; type: string; name: string }[]
-      issueTempId: string
     }) => {
-      const formData = new FormData()
-      files.forEach((f) => formData.append('files[]', f as unknown as Blob))
-      formData.append('issue_temp_id', issueTempId)
-
-      const { data, error } = await supabase.functions.invoke('issues/upload-media', {
-        method: 'POST',
-        body: formData,
-      })
-      if (error) throw error
-      return data as { image_urls: string[]; video_url: string | null }
+      const image_urls: string[] = []
+      for (const file of files) {
+        const url = await uploadToCloudinary(file.uri)
+        image_urls.push(url)
+      }
+      return { image_urls, video_url: null }
     },
   })
 }

@@ -1,8 +1,7 @@
 import { View, Text, Image, TouchableOpacity, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { type Issue } from '../lib/types'
-import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../lib/constants'
-import { StatusBadge } from './StatusBadge'
+import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, STATUS_LABELS, STATUS_COLORS } from '../lib/constants'
 import { SeverityBadge } from './SeverityBadge'
 import { Avatar } from './Avatar'
 import { formatRelativeTime } from '../lib/utils'
@@ -32,7 +31,9 @@ export function IssueCard({ issue, onPress }: Props) {
           </Text>
           <View style={styles.badges}>
             <SeverityBadge severity={issue.severity} />
-            <StatusBadge status={issue.status} />
+            <Text style={[styles.statusText, { color: STATUS_COLORS[issue.status] || COLORS.textMuted }]}>
+              {STATUS_LABELS[issue.status] || issue.status}
+            </Text>
           </View>
           <View style={styles.meta}>
             <Ionicons name="location-outline" size={12} color={COLORS.textSecondary} />
@@ -40,16 +41,16 @@ export function IssueCard({ issue, onPress }: Props) {
               {issue.address || `${issue.latitude.toFixed(4)}, ${issue.longitude.toFixed(4)}`}
             </Text>
           </View>
-          <View style={styles.footer}>
-            <Text style={styles.time}>{formatRelativeTime(issue.created_at)}</Text>
-            <View style={styles.verification}>
-              <Ionicons name="shield-check" size={14} color={COLORS.primary} />
-              <Text style={styles.verifCount}>{issue.verification_count}</Text>
+            <View style={styles.footer}>
+              <Text style={styles.time}>{formatRelativeTime(issue.created_at)}</Text>
+              <View style={styles.verification}>
+                <Ionicons name="shield-checkmark" size={14} color={COLORS.primary} />
+                <Text style={styles.verifCount}>{issue.verification_count}</Text>
+              </View>
+              {issue.reporter && (
+                <Avatar name={issue.reporter.name} url={issue.reporter.avatar_url} size={20} />
+              )}
             </View>
-            {issue.reporter && (
-              <Avatar name={issue.reporter.name} url={issue.reporter.avatar_url} size={20} />
-            )}
-          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -96,6 +97,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   time: { fontSize: FONT_SIZES.caption, color: COLORS.textMuted },
+  statusText: { fontSize: FONT_SIZES.caption, fontWeight: '600' },
   verification: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   verifCount: {
     fontSize: FONT_SIZES.caption,

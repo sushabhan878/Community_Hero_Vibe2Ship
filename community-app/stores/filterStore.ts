@@ -10,12 +10,14 @@ interface FilterState {
   sortBy: SortBy
   search: string
   viewMode: 'list' | 'map'
+  pendingFilter: string
   setStatus: (status: IssueStatus[]) => void
   setCategory: (category: IssueCategory[]) => void
   setSeverity: (severity: IssueSeverity[]) => void
   setSortBy: (sort: SortBy) => void
   setSearch: (search: string) => void
   setViewMode: (mode: 'list' | 'map') => void
+  setPendingFilter: (filter: string) => void
   reset: () => void
   activeCount: () => number
 }
@@ -27,6 +29,7 @@ const initialState = {
   sortBy: 'newest' as SortBy,
   search: '',
   viewMode: 'list' as const,
+  pendingFilter: '',
 }
 
 export const useFilterStore = create<FilterState>((set, get) => ({
@@ -37,6 +40,7 @@ export const useFilterStore = create<FilterState>((set, get) => ({
   setSortBy: (sortBy) => set({ sortBy }),
   setSearch: (search) => set({ search }),
   setViewMode: (viewMode) => set({ viewMode }),
+  setPendingFilter: (pendingFilter) => set({ pendingFilter }),
   reset: () => set(initialState),
   activeCount: () => {
     const s = get()

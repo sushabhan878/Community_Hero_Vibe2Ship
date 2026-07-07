@@ -1,14 +1,12 @@
-import type { IssueStatus, IssueSeverity, IssueCategory } from '@/types'
+import type { IssueStatus, IssueSeverity, IssueCategory, DepartmentSlug } from '@/types'
 
 export const NAV_ITEMS = [
   { label: 'Overview', href: '/dashboard', icon: 'LayoutDashboard', roles: ['department_admin', 'super_admin'] },
   { label: 'Issues', href: '/dashboard/issues', icon: 'AlertTriangle', roles: ['department_admin', 'super_admin'] },
-  { label: 'Analytics', href: '/dashboard/analytics', icon: 'BarChart3', roles: ['department_admin', 'super_admin'] },
-  { label: 'Leaderboard', href: '/dashboard/leaderboard', icon: 'Trophy', roles: ['department_admin', 'super_admin'] },
-  { label: 'Notifications', href: '/dashboard/notifications', icon: 'Bell', roles: ['department_admin', 'super_admin'] },
 ]
 
 export const ADMIN_NAV_ITEMS = [
+  { label: 'Leaderboard', href: '/dashboard/admin/leaderboard', icon: 'Trophy' },
   { label: 'Users', href: '/dashboard/admin/users', icon: 'Users' },
   { label: 'Departments', href: '/dashboard/admin/departments', icon: 'Building2' },
 ]
@@ -29,6 +27,15 @@ export const SEVERITY_OPTIONS: { label: string; value: IssueSeverity }[] = [
   { label: 'High', value: 'high' },
   { label: 'Medium', value: 'medium' },
   { label: 'Low', value: 'low' },
+]
+
+export const DEPARTMENT_OPTIONS: { label: string; value: DepartmentSlug }[] = [
+  { label: 'Roads', value: 'roads' },
+  { label: 'Water', value: 'water' },
+  { label: 'Electricity', value: 'electricity' },
+  { label: 'Waste', value: 'waste' },
+  { label: 'Parks', value: 'parks' },
+  { label: 'Other', value: 'other' },
 ]
 
 export const CATEGORY_OPTIONS: { label: string; value: IssueCategory }[] = [

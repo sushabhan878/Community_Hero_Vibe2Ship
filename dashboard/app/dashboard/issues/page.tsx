@@ -6,7 +6,6 @@ import { RefreshCw, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { IssueFilters } from '@/components/issues/issue-filters'
 import { IssueTable } from '@/components/issues/issue-table'
-import { createClient } from '@/lib/supabase/client'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Issue, Pagination } from '@/types'
 
@@ -23,43 +22,56 @@ export default function IssuesPage() {
 
   const fetchIssues = useCallback(async () => {
     setLoading(true)
-    const supabase = createClient()
 
-    const params = new URLSearchParams(searchParams.toString())
-    params.set('sort_by', sortBy)
-    params.set('sort_order', sortOrder)
+    const params = new URLSearchParams()
     params.set('page', searchParams.get('page') ?? '1')
     params.set('limit', '25')
+    params.set('sort_by', sortBy)
+    params.set('sort_order', sortOrder)
 
-    const { data, error } = await supabase.functions.invoke('analytics/issues-table', {
-      body: Object.fromEntries(params),
-    })
+    const status = searchParams.get('status')
+    const severity = searchParams.get('severity')
+    const department = searchParams.get('department')
+    const category = searchParams.get('category')
+    const search = searchParams.get('search')
 
-    if (!error && data) {
-      setIssues(data.issues ?? [])
+    if (status) params.set('status', status)
+    if (severity) params.set('severity', severity)
+    if (department) params.set('department', department)
+    if (category) params.set('category', category)
+    if (search) params.set('search', search)
+
+    try {
+      const res = await fetch(`/api/issues?${params.toString()}`)
+      if (!res.ok) {
+        console.error('fetchIssues error:', res.status, await res.text())
+        setLoading(false)
+        return
+      }
+      const data = await res.json()
+      const fetched = (data.issues ?? []).map((issue: Record<string, unknown>) => ({
+        ...issue,
+        days_open: issue.resolved_at
+          ? Math.floor(
+              (new Date(issue.resolved_at as string).getTime() -
+                new Date(issue.created_at as string).getTime()) /
+                (1000 * 60 * 60 * 24),
+            )
+          : Math.floor(
+              (Date.now() - new Date(issue.created_at as string).getTime()) /
+                (1000 * 60 * 60 * 24),
+            ),
+      })) as Issue[]
+      setIssues(fetched)
       setPagination(data.pagination ?? { page: 1, limit: 25, total: 0, has_more: false })
+    } catch (err) {
+      console.error('fetchIssues error:', err)
     }
     setLoading(false)
   }, [searchParams, sortBy, sortOrder])
 
   useEffect(() => {
     fetchIssues()
-  }, [fetchIssues])
-
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel('dept-issues-realtime')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'issues',
-      }, () => {
-        fetchIssues()
-      })
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
   }, [fetchIssues])
 
   const handlePageChange = (page: number) => {

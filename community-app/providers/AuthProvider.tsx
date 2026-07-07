@@ -31,6 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function fetchProfile(userId: string) {
     try {
+      await supabase.rpc('allocate_badges', { user_id: userId })
+
       const { data } = await supabase
         .from('profiles')
         .select('*, badges(*), department:departments(*)')

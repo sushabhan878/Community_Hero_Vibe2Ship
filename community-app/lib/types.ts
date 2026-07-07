@@ -127,6 +127,7 @@ export interface Badge {
 
 export interface IssueMarker {
   id: string
+  title?: string
   latitude: number
   longitude: number
   category: IssueCategory
@@ -195,6 +196,20 @@ export interface Prediction {
     change_pct: number
   }[]
 }
+
+export interface AiImageAnalysis {
+  category: IssueCategory
+  severity: IssueSeverity
+  title: string
+  description: string
+  department: DepartmentSlug
+  confidence: number
+  is_valid_civic_issue: boolean
+  rejection_reason?: string
+  estimated_resolution_days?: number
+}
+
+export type SortBy = 'newest' | 'nearest' | 'most_verified' | 'severity'
 
 export interface Pagination {
   page: number

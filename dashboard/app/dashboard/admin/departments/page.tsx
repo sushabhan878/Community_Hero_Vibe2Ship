@@ -81,6 +81,26 @@ export default function AdminDepartmentsPage() {
         contact_phone: formPhone || null,
       }).eq('id', editing.id)
       toast('Department updated', 'success')
+    } else {
+      const generatedSlug = formName
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '_')
+
+      const { error } = await supabase.from('departments').insert({
+        name: formName,
+        slug: generatedSlug,
+        contact_email: formEmail || null,
+        contact_phone: formPhone || null,
+        is_active: true,
+      })
+
+      if (error) {
+        console.error('Create department error:', error)
+        toast(error.message, 'error')
+      } else {
+        toast('Department created', 'success')
+      }
     }
 
     setSaving(false)

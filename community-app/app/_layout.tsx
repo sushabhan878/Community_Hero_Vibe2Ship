@@ -49,11 +49,11 @@ export default function RootLayout() {
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen
                   name="issue/[id]"
-                  options={{ presentation: 'card', headerShown: true, title: 'Issue' }}
+                  options={{ presentation: 'card', headerShown: false }}
                 />
                 <Stack.Screen
                   name="leaderboard"
-                  options={{ presentation: 'card', headerShown: true, title: 'Leaderboard' }}
+                  options={{ presentation: 'card', headerShown: false }}
                 />
                 <Stack.Screen
                   name="admin"
@@ -62,6 +62,10 @@ export default function RootLayout() {
                 <Stack.Screen
                   name="analytics/index"
                   options={{ presentation: 'card', headerShown: true, title: 'Analytics' }}
+                />
+                <Stack.Screen
+                  name="about"
+                  options={{ presentation: 'card', headerShown: false }}
                 />
               </Stack>
               <StatusBar style="dark" />

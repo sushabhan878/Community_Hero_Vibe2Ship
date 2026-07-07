@@ -60,15 +60,15 @@ export const CATEGORY_LABELS: Record<string, string> = {
 }
 
 export const CATEGORY_ICONS: Record<string, string> = {
-  pothole: 'road-variant',
-  road_damage: 'road',
+  pothole: 'car-sport',
+  road_damage: 'car',
   water_leak: 'water',
-  sewage: 'pipe',
-  streetlight: 'lightbulb-on',
-  garbage: 'trash-can',
-  illegal_dumping: 'dump-truck',
-  fallen_tree: 'tree',
-  park_damage: 'tree',
+  sewage: 'construct',
+  streetlight: 'bulb',
+  garbage: 'trash',
+  illegal_dumping: 'trash-bin',
+  fallen_tree: 'leaf',
+  park_damage: 'leaf',
   other: 'help-circle',
 }
 
@@ -102,14 +102,14 @@ export const BADGE_LABELS: Record<string, string> = {
 }
 
 export const BADGE_CRITERIA: Record<string, string> = {
-  first_report: 'Report your first issue',
-  neighborhood_watch: 'Report 10 issues',
-  problem_solver: 'Get 5 reports resolved',
-  community_pillar: 'Give 50 verifications',
-  speed_reporter: 'Report within 1hr of issue starting',
-  top_hero: 'Top 10 on leaderboard',
-  verified_reporter: 'Get 3 reports verified',
-  super_verifier: 'Give 10 verifications in one day',
+  first_report: 'Submit more than 1 issue',
+  neighborhood_watch: 'Reach 100 hero score',
+  problem_solver: 'Reach 200 hero score',
+  community_pillar: 'Reach 400 hero score',
+  speed_reporter: 'Reach 30 hero score',
+  top_hero: 'Reach 700 hero score',
+  verified_reporter: 'Submit more than 5 issues and get all resolved',
+  super_verifier: 'Submit more than 10 issues',
 }
 
 export const VALID_STATUS_TRANSITIONS: Record<string, string[]> = {

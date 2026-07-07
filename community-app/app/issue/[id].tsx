@@ -7,16 +7,18 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import MapView, { Marker } from 'react-native-maps'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useIssue, useUpdateIssueStatus } from '../../hooks/useIssues'
+import { useIssue, useUpdateIssueStatus, useUpdateAiAnalysis } from '../../hooks/useIssues'
 import { useAuthStore } from '../../stores/authStore'
 import { StatusBadge } from '../../components/StatusBadge'
 import { SeverityBadge } from '../../components/SeverityBadge'
 import { CategoryIcon } from '../../components/CategoryIcon'
 import { Avatar } from '../../components/Avatar'
 import { TimelineItem } from '../../components/TimelineItem'
-import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, VALID_STATUS_TRANSITIONS, STATUS_LABELS } from '../../lib/constants'
+import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, VALID_STATUS_TRANSITIONS, STATUS_LABELS, CATEGORY_LABELS } from '../../lib/constants'
+import { type Profile } from '../../lib/types'
 import { formatRelativeTime, formatDate } from '../../lib/utils'
-import { supabase } from '../../lib/supabase'
+import { getAuthHeaders } from '../../lib/api'
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default function IssueDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -28,26 +30,49 @@ export default function IssueDetailScreen() {
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [newStatus, setNewStatus] = useState('')
   const [statusNote, setStatusNote] = useState('')
+  const [showAiEditModal, setShowAiEditModal] = useState(false)
+  const [editAiSummary, setEditAiSummary] = useState('')
+  const [editAiCategory, setEditAiCategory] = useState('other')
+  const [editAiSeverity, setEditAiSeverity] = useState('low')
+  const [verifying, setVerifying] = useState(false)
+  const [justVerified, setJustVerified] = useState(false)
   const updateStatus = useUpdateIssueStatus()
+  const updateAiAnalysis = useUpdateAiAnalysis()
 
   const isDeptAdmin = profile?.role === 'department_admin'
   const isSuperAdmin = profile?.role === 'super_admin'
   const isReporter = issue?.reporter_id === profile?.id
-  const canVerify = !isReporter && issue?.status && ['ai_processed', 'verified'].includes(issue.status)
+  const canVerify = true
 
   const handleVerify = useCallback(async () => {
-    if (!id) return
+    if (!id || verifying) return
+    setVerifying(true)
     try {
-      if (issue?.has_verified) {
-        await supabase.functions.invoke(`issues/${id}/verify`, { method: 'DELETE' })
-      } else {
-        await supabase.functions.invoke(`issues/${id}/verify`, { method: 'POST' })
-      }
+      const headers = await getAuthHeaders()
+      const method = issue?.has_verified ? 'DELETE' : 'POST'
+      const res = await fetch(`${API_URL}/api/issues/${id}/verify`, { method, headers })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error?.message || 'Failed to verify')
+      if (!issue?.has_verified) setJustVerified(true)
       refetch()
-    } catch {
-      Alert.alert('Error', 'Could not update verification')
+      const user = useAuthStore.getState().session?.user
+      if (user) {
+        await supabase.rpc('allocate_badges', { user_id: user.id })
+        const { data } = await supabase
+          .from('profiles')
+          .select('*, badges(*), department:departments(*)')
+          .eq('id', user.id)
+          .single()
+        if (data) {
+          useAuthStore.getState().setProfile(data as unknown as Profile)
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to verify')
+    } finally {
+      setVerifying(false)
     }
-  }, [id, issue?.has_verified, refetch])
+  }, [id, issue?.has_verified, refetch, verifying])
 
   const handleStatusChange = useCallback(async () => {
     if (!newStatus) return
@@ -138,8 +163,21 @@ export default function IssueDetailScreen() {
         </View>
 
         {issue.ai_summary && (
-          <View style={[styles.section, styles.aiSection]}>
-            <Text style={styles.sectionTitle}>AI Analysis</Text>
+          <View style={styles.aiCard}>
+            <View style={styles.aiCardHeader}>
+              <Text style={styles.aiCardTitle}>AI Analysis</Text>
+              <TouchableOpacity
+                style={styles.aiEditButton}
+                onPress={() => {
+                  setEditAiSummary(issue.ai_summary ?? '')
+                  setEditAiCategory(issue.ai_category ?? issue.category ?? 'other')
+                  setEditAiSeverity(issue.ai_severity ?? issue.severity ?? 'low')
+                  setShowAiEditModal(true)
+                }}
+              >
+                <Ionicons name="create-outline" size={18} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
             <Text style={styles.aiSummary}>{issue.ai_summary}</Text>
             {issue.ai_confidence && (
               <View style={styles.confidenceRow}>
@@ -174,17 +212,24 @@ export default function IssueDetailScreen() {
           </View>
           {canVerify && (
             <TouchableOpacity
-              style={[styles.verifyButton, issue.has_verified && styles.verifyButtonActive]}
+              style={[styles.verifyButton, (issue.has_verified || justVerified) && styles.verifyButtonActive]}
               onPress={handleVerify}
+              disabled={verifying}
             >
-              <Ionicons
-                name={issue.has_verified ? 'shield-check' : 'shield-outline'}
-                size={20}
-                color={issue.has_verified ? COLORS.white : COLORS.primary}
-              />
-              <Text style={[styles.verifyText, issue.has_verified && styles.verifyTextActive]}>
-                {issue.has_verified ? 'Verified' : 'Verify'}
-              </Text>
+              {verifying ? (
+                <ActivityIndicator size="small" color={COLORS.white} />
+              ) : (
+                <>
+                  <Ionicons
+                    name={issue.has_verified || justVerified ? 'shield-checkmark' : 'shield-outline'}
+                    size={20}
+                    color={issue.has_verified || justVerified ? COLORS.white : COLORS.primary}
+                  />
+                  <Text style={[styles.verifyText, (issue.has_verified || justVerified) && styles.verifyTextActive]}>
+                    {justVerified ? 'You verified the issue' : issue.has_verified ? 'Verified' : 'Verify'}
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
         </View>
@@ -216,6 +261,86 @@ export default function IssueDetailScreen() {
 
         <View style={{ height: SPACING.xxxxl }} />
       </ScrollView>
+
+      <Modal visible={showAiEditModal} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Edit AI Analysis</Text>
+            <Text style={styles.modalSubtitle}>Correct the AI's assessment</Text>
+
+            <Text style={styles.fieldLabel}>Summary</Text>
+            <TextInput
+              style={styles.noteInput}
+              placeholder="AI summary"
+              placeholderTextColor={COLORS.textMuted}
+              value={editAiSummary}
+              onChangeText={setEditAiSummary}
+              multiline
+            />
+
+            <Text style={styles.fieldLabel}>Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerRow}>
+              {['pothole', 'road_damage', 'water_leak', 'sewage', 'streetlight', 'garbage', 'illegal_dumping', 'fallen_tree', 'park_damage', 'other'].map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.pickerOption, editAiCategory === cat && styles.pickerOptionActive]}
+                  onPress={() => setEditAiCategory(cat)}
+                >
+                  <Text style={[styles.pickerOptionText, editAiCategory === cat && styles.pickerOptionTextActive]}>
+                    {CATEGORY_LABELS[cat] ?? cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.fieldLabel}>Severity</Text>
+            <View style={styles.pickerRow}>
+              {['low', 'medium', 'high', 'critical'].map((sev) => (
+                <TouchableOpacity
+                  key={sev}
+                  style={[styles.pickerOption, editAiSeverity === sev && styles.pickerOptionActive]}
+                  onPress={() => setEditAiSeverity(sev)}
+                >
+                  <Text style={[styles.pickerOptionText, editAiSeverity === sev && styles.pickerOptionTextActive]}>
+                    {sev.charAt(0).toUpperCase() + sev.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowAiEditModal(false)}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmButton, updateAiAnalysis.isPending && styles.buttonDisabled]}
+                onPress={async () => {
+                  try {
+                    await updateAiAnalysis.mutateAsync({
+                      id: id!,
+                      ai_summary: editAiSummary,
+                      ai_category: editAiCategory,
+                      ai_severity: editAiSeverity,
+                    })
+                    setShowAiEditModal(false)
+                    refetch()
+                  } catch {
+                    Alert.alert('Error', 'Could not update AI analysis')
+                  }
+                }}
+                disabled={updateAiAnalysis.isPending}
+              >
+                {updateAiAnalysis.isPending ? (
+                  <ActivityIndicator color={COLORS.white} size="small" />
+                ) : (
+                  <Text style={styles.confirmText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={showStatusModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -293,14 +418,39 @@ const styles = StyleSheet.create({
   description: { fontSize: FONT_SIZES.body, color: COLORS.textSecondary, lineHeight: 24, marginTop: SPACING.sm },
   locationText: { fontSize: FONT_SIZES.bodySm, color: COLORS.textSecondary, marginBottom: SPACING.md },
   mapPreview: { width: '100%', height: 150, borderRadius: BORDER_RADIUS.card },
-  aiSection: { backgroundColor: COLORS.primaryLight + '20' },
-  aiSummary: { fontSize: FONT_SIZES.bodySm, color: COLORS.textPrimary, fontStyle: 'italic' },
-  confidenceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: SPACING.sm },
-  confidenceLabel: { fontSize: FONT_SIZES.caption, color: COLORS.textSecondary },
-  confidenceBar: { flex: 1, height: 6, backgroundColor: COLORS.border, borderRadius: 3 },
-  confidenceFill: { height: 6, backgroundColor: COLORS.primary, borderRadius: 3 },
-  confidenceText: { fontSize: FONT_SIZES.caption, fontWeight: '600', color: COLORS.primary },
-  deptText: { fontSize: FONT_SIZES.bodySm, color: COLORS.textSecondary, marginTop: SPACING.sm },
+  aiCard: {
+    backgroundColor: COLORS.white, marginHorizontal: SPACING.lg, marginTop: SPACING.lg,
+    borderRadius: BORDER_RADIUS.card, borderWidth: 1, borderColor: COLORS.border,
+    padding: SPACING.lg, shadowColor: COLORS.black, shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  },
+  aiCardHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  aiCardTitle: { fontSize: FONT_SIZES.h3, fontWeight: '700', color: COLORS.textPrimary },
+  aiEditButton: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: COLORS.primaryLight + '30',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  aiSummary: { fontSize: FONT_SIZES.bodySm, color: COLORS.textPrimary, lineHeight: 20 },
+  confidenceRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginTop: SPACING.md },
+  confidenceLabel: { fontSize: FONT_SIZES.caption, color: COLORS.textSecondary, width: 64 },
+  confidenceBar: { flex: 1, height: 8, backgroundColor: COLORS.surface, borderRadius: 4, overflow: 'hidden' },
+  confidenceFill: { height: 8, backgroundColor: COLORS.primary, borderRadius: 4 },
+  confidenceText: { fontSize: FONT_SIZES.caption, fontWeight: '700', color: COLORS.primary, width: 36, textAlign: 'right' },
+  deptText: { fontSize: FONT_SIZES.bodySm, color: COLORS.textSecondary, marginTop: SPACING.md },
+  fieldLabel: { fontSize: FONT_SIZES.bodySm, fontWeight: '600', color: COLORS.textPrimary, marginTop: SPACING.md, marginBottom: SPACING.xs },
+  pickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
+  pickerOption: {
+    paddingVertical: SPACING.sm, paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.badge, borderWidth: 1, borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+  },
+  pickerOptionActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  pickerOptionText: { fontSize: FONT_SIZES.caption, fontWeight: '500', color: COLORS.textSecondary },
+  pickerOptionTextActive: { color: COLORS.white },
   reporterRow: { flexDirection: 'row', gap: SPACING.md, alignItems: 'center' },
   reporterName: { fontSize: FONT_SIZES.body, fontWeight: '600' },
   reporterScore: { fontSize: FONT_SIZES.caption, color: COLORS.textSecondary },

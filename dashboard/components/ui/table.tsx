@@ -35,7 +35,9 @@ export function TableRow({ className, children, ...props }: HTMLAttributes<HTMLT
         className,
       )}
       {...props}
-    />
+    >
+      {children}
+    </tr>
   )
 }
 

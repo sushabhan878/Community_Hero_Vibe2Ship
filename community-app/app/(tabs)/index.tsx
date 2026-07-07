@@ -1,28 +1,33 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
-  RefreshControl, ActivityIndicator,
+  RefreshControl, ActivityIndicator, Alert,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import MapView, { Marker, Callout, type Region } from 'react-native-maps'
 import * as Location from 'expo-location'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { useIssues, useNearbyMarkers } from '../../hooks/useIssues'
+import { useIssues } from '../../hooks/useIssues'
 import { useFilterStore } from '../../stores/filterStore'
+import { useAuthStore } from '../../stores/authStore'
 import { IssueCard } from '../../components/IssueCard'
 import { StatusBadge } from '../../components/StatusBadge'
 import { SeverityBadge } from '../../components/SeverityBadge'
-import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SEVERITY_COLORS } from '../../lib/constants'
-import { type IssueCategory, type IssueSeverity, type IssueStatus } from '../../lib/types'
+import { CategoryIcon } from '../../components/CategoryIcon'
+import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, SEVERITY_COLORS, CATEGORY_ICONS } from '../../lib/constants'
 
 const FILTER_CHIPS: { label: string; key: string }[] = [
   { label: 'All', key: '' },
+  { label: 'Near Me', key: 'nearby' },
+  { label: 'My Issues', key: 'my' },
   { label: 'Pending', key: 'pending' },
   { label: 'Verified', key: 'verified' },
   { label: 'In Progress', key: 'in_progress' },
   { label: 'Resolved', key: 'resolved' },
 ]
+
+const DEFAULT_LOCATION = { latitude: 12.9716, longitude: 77.5946 }
 
 export default function FeedScreen() {
   const router = useRouter()
@@ -31,8 +36,43 @@ export default function FeedScreen() {
   const [chipFilter, setChipFilter] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [region, setRegion] = useState<Region | null>(null)
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null)
+  const [locPermission, setLocPermission] = useState(false)
 
-  const { viewMode, setViewMode, sortBy, setSortBy, activeCount } = useFilterStore()
+  const { viewMode, setViewMode, sortBy, setSortBy, activeCount, pendingFilter, setPendingFilter } = useFilterStore()
+  const { profile } = useAuthStore()
+
+  useEffect(() => {
+    if (pendingFilter) {
+      setChipFilter(pendingFilter)
+      setPendingFilter('')
+    }
+  }, [pendingFilter, setPendingFilter])
+
+  useEffect(() => {
+    ;(async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== 'granted') {
+        setUserLocation(DEFAULT_LOCATION)
+        return
+      }
+      setLocPermission(true)
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude })
+    })()
+  }, [])
+
+  const useNearby = chipFilter === 'nearby'
+
+  const issuesParams = {
+    status: chipFilter === 'my' || chipFilter === 'nearby' ? undefined : chipFilter,
+    reporter_id: chipFilter === 'my' ? profile?.id : undefined,
+    search: search || undefined,
+    sort: sortBy,
+    lat: useNearby ? (userLocation?.latitude ?? region?.latitude) : undefined,
+    lng: useNearby ? (userLocation?.longitude ?? region?.longitude) : undefined,
+    radius_km: useNearby ? 2 : undefined,
+  }
 
   const {
     data,
@@ -42,19 +82,25 @@ export default function FeedScreen() {
     isLoading,
     refetch,
     isRefetching,
-  } = useIssues({
-    status: chipFilter,
-    search: search || undefined,
-    sort: sortBy,
-  })
-
-  const { data: nearbyMarkers } = useNearbyMarkers(
-    region?.latitude,
-    region?.longitude,
-    5,
-  )
+  } = useIssues(issuesParams)
 
   const issues = data?.pages.flatMap((p) => p.issues) ?? []
+
+  const mapMarkers = useMemo(
+    () =>
+      issues
+        .filter((i) => i.latitude && i.longitude)
+        .map((i) => ({
+          id: i.id,
+          title: i.title,
+          latitude: i.latitude,
+          longitude: i.longitude,
+          category: i.category,
+          severity: i.severity,
+          status: i.status,
+        })),
+    [issues],
+  )
 
   const handleIssuePress = useCallback((id: string) => {
     router.push(`/issue/${id}`)
@@ -146,9 +192,19 @@ export default function FeedScreen() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
           onEndReached={() => hasNextPage && fetchNextPage()}
           onEndReachedThreshold={0.5}
-          ListFooterComponent={isFetchingNextPage ? (
-            <ActivityIndicator style={{ padding: SPACING.xl }} color={COLORS.primary} />
-          ) : null}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <ActivityIndicator style={{ padding: SPACING.xl }} color={COLORS.primary} />
+            ) : hasNextPage ? (
+              <TouchableOpacity style={styles.loadMoreButton} onPress={() => fetchNextPage()}>
+                <Text style={styles.loadMoreText}>Load More</Text>
+              </TouchableOpacity>
+            ) : issues.length > 0 ? (
+              <View style={styles.endOfList}>
+                <Text style={styles.endOfListText}>All issues loaded</Text>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             isLoading ? (
               <View style={styles.emptyState}>
@@ -167,31 +223,47 @@ export default function FeedScreen() {
       ) : (
         <MapView
           style={styles.map}
-          initialRegion={{
-            latitude: 12.9716,
-            longitude: 77.5946,
+          region={{
+            latitude: userLocation?.latitude ?? DEFAULT_LOCATION.latitude,
+            longitude: userLocation?.longitude ?? DEFAULT_LOCATION.longitude,
             latitudeDelta: 0.05,
             longitudeDelta: 0.05,
           }}
           onRegionChangeComplete={handleRegionChange}
           showsUserLocation
         >
-          {(nearbyMarkers ?? []).map((marker) => (
-            <Marker
-              key={marker.id}
-              coordinate={{ latitude: marker.latitude, longitude: marker.longitude }}
-              pinColor={SEVERITY_COLORS[marker.severity] || COLORS.textMuted}
-              onCalloutPress={() => handleIssuePress(marker.id)}
-            >
-              <Callout>
-                <View style={styles.callout}>
-                  <Text style={styles.calloutCategory}>{marker.category}</Text>
-                  <SeverityBadge severity={marker.severity} />
-                  <StatusBadge status={marker.status} />
+          {mapMarkers.map((marker) => {
+            const color = SEVERITY_COLORS[marker.severity] || COLORS.textMuted
+            return (
+              <Marker
+                key={marker.id}
+                coordinate={{ latitude: marker.latitude, longitude: marker.longitude }}
+                onPress={() => handleIssuePress(marker.id)}
+              >
+                <View style={[styles.marker, { borderColor: color }]}>
+                  <View style={[styles.markerInner, { backgroundColor: color }]}>
+                      <Ionicons
+                        name={(CATEGORY_ICONS[marker.category] || 'help-circle-outline') as any}
+                        size={11}
+                        color={COLORS.white}
+                      />
+                  </View>
                 </View>
-              </Callout>
-            </Marker>
-          ))}
+                <Callout tooltip onPress={() => handleIssuePress(marker.id)}>
+                  <View style={styles.callout}>
+                    <Text style={styles.calloutCategory}>{marker.category.replace('_', ' ')}</Text>
+                    {marker.title ? (
+                      <Text style={styles.calloutTitle} numberOfLines={2}>{marker.title}</Text>
+                    ) : null}
+                    <View style={styles.calloutBadges}>
+                      <SeverityBadge severity={marker.severity} />
+                      <StatusBadge status={marker.status} />
+                    </View>
+                  </View>
+                </Callout>
+              </Marker>
+            )
+          })}
         </MapView>
       )}
     </View>
@@ -270,9 +342,27 @@ const styles = StyleSheet.create({
   modeText: { fontSize: FONT_SIZES.caption, color: COLORS.textSecondary, fontWeight: '500' },
   modeTextActive: { color: COLORS.white },
   map: { flex: 1 },
-  callout: { padding: SPACING.sm, gap: 4, minWidth: 120 },
+  marker: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2.5, backgroundColor: COLORS.white,
+  },
+  markerInner: {
+    width: 20, height: 20, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  callout: { padding: SPACING.sm, gap: 4, minWidth: 140, maxWidth: 200 },
   calloutCategory: { fontSize: FONT_SIZES.caption, fontWeight: '600', color: COLORS.textPrimary, textTransform: 'capitalize' },
+  calloutTitle: { fontSize: FONT_SIZES.bodySm, color: COLORS.textSecondary, lineHeight: 18 },
+  calloutBadges: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingTop: 100, gap: SPACING.md },
   emptyTitle: { fontSize: FONT_SIZES.h3, color: COLORS.textSecondary, fontWeight: '600' },
   emptySubtitle: { fontSize: FONT_SIZES.bodySm, color: COLORS.textMuted },
+  loadMoreButton: {
+    alignItems: 'center', paddingVertical: SPACING.lg, marginHorizontal: SPACING.xxl,
+    backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.button, marginBottom: SPACING.lg,
+  },
+  loadMoreText: { color: COLORS.white, fontSize: FONT_SIZES.button, fontWeight: '600' },
+  endOfList: { alignItems: 'center', paddingVertical: SPACING.lg },
+  endOfListText: { fontSize: FONT_SIZES.caption, color: COLORS.textMuted },
 })

@@ -8,7 +8,9 @@ import { Ionicons } from '@expo/vector-icons'
 import * as ImagePicker from 'expo-image-picker'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { supabase } from '../../lib/supabase'
+import { uploadToCloudinary } from '../../lib/cloudinary'
 import { useAuthStore } from '../../stores/authStore'
+import { useFilterStore } from '../../stores/filterStore'
 import { Avatar } from '../../components/Avatar'
 import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS, BADGE_LABELS, BADGE_CRITERIA } from '../../lib/constants'
 import { type BadgeSlug } from '../../lib/types'
@@ -16,14 +18,14 @@ import { type BadgeSlug } from '../../lib/types'
 const menuItems = [
   { icon: 'list-outline', label: 'My Reports', route: '/(tabs)' },
   { icon: 'trophy-outline', label: 'Leaderboard', route: '/leaderboard' },
-  { icon: 'settings-outline', label: 'Notification Settings' },
-  { icon: 'information-circle-outline', label: 'About' },
+  { icon: 'information-circle-outline', label: 'About', route: '/about' },
 ]
 
 export default function ProfileScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const { profile, signOut } = useAuthStore()
+  const { setPendingFilter } = useFilterStore()
   const [showEditModal, setShowEditModal] = useState(false)
   const [editName, setEditName] = useState(profile?.name ?? '')
   const [editPhone, setEditPhone] = useState(profile?.phone ?? '')
@@ -50,17 +52,28 @@ export default function ProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
     })
-    if (!result.canceled && result.assets[0]) {
-      const formData = new FormData()
-      formData.append('file', {
-        uri: result.assets[0].uri,
-        type: 'image/jpeg',
-        name: 'avatar.jpg',
-      } as unknown as Blob)
-      await supabase.functions.invoke('profile/avatar', {
-        method: 'POST',
-        body: formData,
-      })
+    if (result.canceled || !result.assets[0]) return
+
+    try {
+      const url = await uploadToCloudinary(result.assets[0].uri)
+      const { error } = await supabase
+        .from('profiles')
+        .update({ avatar_url: url })
+        .eq('id', profile?.id)
+
+      if (error) throw error
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('*, badges(*), department:departments(*)')
+        .eq('id', profile?.id)
+        .single()
+
+      if (data) {
+        useAuthStore.getState().setProfile(data as any)
+      }
+    } catch (e) {
+      Alert.alert('Upload Failed', e instanceof Error ? e.message : 'Could not upload avatar')
     }
   }
 
@@ -69,8 +82,26 @@ export default function ProfileScreen() {
       Alert.alert('Invalid', 'Name must be at least 2 characters')
       return
     }
-    await supabase.from('profiles').update({ name: editName.trim(), phone: editPhone.trim() || null })
+    const { error } = await supabase
+      .from('profiles')
+      .update({ name: editName.trim(), phone: editPhone.trim() || null })
       .eq('id', profile?.id)
+
+    if (error) {
+      Alert.alert('Error', error.message)
+      return
+    }
+
+    const { data } = await supabase
+      .from('profiles')
+      .select('*, badges(*), department:departments(*)')
+      .eq('id', profile?.id)
+      .single()
+
+    if (data) {
+      useAuthStore.getState().setProfile(data as any)
+    }
+
     setShowEditModal(false)
   }
 
@@ -152,7 +183,10 @@ export default function ProfileScreen() {
             <TouchableOpacity
               key={i}
               style={styles.menuItem}
-              onPress={() => item.route && router.push(item.route as any)}
+              onPress={() => {
+                if (item.label === 'My Reports') setPendingFilter('my')
+                if (item.route) router.push(item.route as any)
+              }}
             >
               <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={22} color={COLORS.textPrimary} />
               <Text style={styles.menuLabel}>{item.label}</Text>

@@ -4,13 +4,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import {
-  LayoutDashboard, AlertTriangle, BarChart3, Trophy,
-  Bell, Users, Building2, ChevronLeft, X,
+  LayoutDashboard, AlertTriangle, Trophy,
+  Users, Building2, ChevronLeft, X,
 } from 'lucide-react'
 import { NAV_ITEMS, ADMIN_NAV_ITEMS } from '@/lib/constants'
 
 const iconMap: Record<string, React.ElementType> = {
-  LayoutDashboard, AlertTriangle, BarChart3, Trophy, Bell, Users, Building2,
+  LayoutDashboard, AlertTriangle, Trophy, Users, Building2,
 }
 
 interface SidebarProps {

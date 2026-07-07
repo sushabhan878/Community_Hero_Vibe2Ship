@@ -45,7 +45,8 @@ CREATE TYPE notification_type AS ENUM (
 
 CREATE TYPE badge_slug AS ENUM (
   'first_report', 'neighborhood_watch', 'problem_solver',
-  'community_pillar', 'speed_reporter', 'top_hero'
+  'community_pillar', 'speed_reporter', 'top_hero',
+  'verified_reporter', 'super_verifier'
 );
 
 -- ######################
@@ -286,6 +287,65 @@ CREATE TRIGGER trg_profiles_updated_at
 CREATE TRIGGER trg_push_tokens_updated_at
   BEFORE UPDATE ON push_tokens
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- 5g. Allocate badges based on user stats
+CREATE OR REPLACE FUNCTION allocate_badges(user_id uuid)
+RETURNS SETOF badges AS $$
+DECLARE
+  user_profile RECORD;
+BEGIN
+  SELECT total_reports, total_resolved, total_verified, hero_score
+  INTO user_profile
+  FROM profiles
+  WHERE id = user_id;
+
+  IF NOT FOUND THEN
+    RETURN;
+  END IF;
+
+  IF user_profile.total_reports > 1 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'first_report')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.total_reports > 5 AND user_profile.total_reports = user_profile.total_resolved THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'verified_reporter')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.total_reports > 10 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'super_verifier')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.hero_score >= 30 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'speed_reporter')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.hero_score >= 200 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'problem_solver')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.hero_score > 50 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'community_pillar')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.hero_score > 100 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'top_hero')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  IF user_profile.total_verified > 0 THEN
+    INSERT INTO badges (user_id, slug) VALUES (user_id, 'neighborhood_watch')
+    ON CONFLICT (user_id, slug) DO NOTHING;
+  END IF;
+
+  RETURN QUERY SELECT * FROM badges WHERE user_id = user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ######################
 -- 6. ROW LEVEL SECURITY
